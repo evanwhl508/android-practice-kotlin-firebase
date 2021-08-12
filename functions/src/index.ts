@@ -113,8 +113,9 @@ exports.buyCoin = functions.https.onRequest(async (req, res) => {
             const timestamp = Date.now();
             const body = req.body
             console.log(`body = ${body}`)
-            const username = body.username;
-            const pair = body.pair;
+            let username = body.username;
+            let pair = body.pair;
+            let price = body.price;
             let amount = parseInt(body.amount);
             console.log(`username = ${username}, pair = ${pair}, amount = ${amount}, `)
 
@@ -133,17 +134,26 @@ exports.buyCoin = functions.https.onRequest(async (req, res) => {
             await checkBalance();
             let userBalance: FirebaseFirestore.DocumentData = db.collection('balance').doc(username);
 
-            const transactions = db.doc(`transaction/${username}/buy/${pair}_${timestamp}`);
-            const usdtBalance = (await userBalance.get()).data().usdt;
+            let transactions = db.collection(`transaction`);
+            let usdtBalance = (await userBalance.get()).get('usdt');
+            let targetBalance = (await userBalance.get()).get(pair);
+            if (targetBalance == undefined) {
+                targetBalance = 0;
+            }
 
 
-            transactions.set({
+            transactions.add({
+                'username': username,
                 'timestamp': timestamp,
-                'price': 1234.5678,
+                'price': price,
                 'amount': amount,
+                'direction': 'buy'
             });
 
-            userBalance.set({'usdt': usdtBalance + amount}, {merge: true});
+            userBalance.update({
+                'usdt': usdtBalance - amount,
+                [`${pair}`]: targetBalance + amount
+            });
             res.json({"success": true});
             break;
         default:
