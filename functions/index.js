@@ -111,3 +111,61 @@ exports.readAlert = functions.https.onRequest(async (req, res) => {
     })
     res.json(json_res);
   });
+
+  const getFieldsFromFormData = (headers, body) =>
+    new Promise(async (resolve, reject) => {
+        const Busboy = require('busboy');
+        const busboy = new Busboy({ headers });
+        let fields = {};
+        
+        busboy.on("field", (field, val) => fields[field] = val)
+        busboy.on('finish',() => resolve(fields));
+        busboy.end(body)
+  });
+
+  exports.buyCoin = functions.https.onRequest(async (req, res) => {
+      switch (req.method) {
+          case 'POST':
+            timestamp = Date.now();
+            // body = await getFieldsFromFormData(req.headers, req.body);
+            body = req.body
+            console.log(`body = ${body}`)
+            username = body.username;
+            pair = body.pair;
+            amount = parseInt(body.amount);
+            console.log(`username = ${username}, pair = ${pair}, amount = ${amount}, `)
+
+            const db = admin.firestore()
+            // Get the `FieldValue` object
+            const FieldValue = admin.firestore.FieldValue;
+
+            const checkBalance = async () => {
+                db.collection('balance').doc(username).get().then((doc) => {
+                if (!doc.exists) {
+                    // doc.data() will be undefined in this case
+                    db.collection('balance').doc(username).set({'usdt': 0});
+                }
+                }).catch((error) => {
+                    console.log("Error getting document:", error);
+                });
+            }
+            await checkBalance();
+            let balance = db.collection('balance').doc(username);
+
+            const transactions = db.doc(`transaction/${username}/buy/${pair}_${timestamp}`);
+            const usdtBalance = (await balance.get()).data().usdt;
+
+
+            transactions.set({
+                'timestamp': timestamp,
+                'price': 1234.5678,
+                'amount': amount,
+            });
+
+            balance.set({'usdt': usdtBalance + amount}, {merge: true});
+            res.json({"success": true});
+            break;
+        default:
+            res.status(403).send('Forbidden!');
+    }
+  });
