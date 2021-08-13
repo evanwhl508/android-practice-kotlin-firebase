@@ -107,56 +107,59 @@ exports.readAlert = functions.https.onRequest(async (req, res) => {
   });
 
 
-exports.buyCoin = functions.https.onRequest(async (req, res) => {
-    switch (req.method) {
-        case 'POST':
-            const timestamp = Date.now();
-            const body = req.body
-            console.log(`body = ${body}`)
-            let username = body.username;
-            let pair = body.pair;
-            let price = body.price;
-            let amount = parseInt(body.amount);
-            console.log(`username = ${username}, pair = ${pair}, amount = ${amount}, `)
+exports.buyCoin = functions.https.onCall(async (data, context) => {
+    // switch (req.method) {
+    //     case 'POST':
+        const timestamp = Date.now();
+        // const body = req.body
+        // console.log(`body = ${body}`)
+        let username = data.username;
+        let pair = data.pair;
+        let price = data.price;
+        let amount = parseInt(data.amount);
+        console.log(`username = ${username}, pair = ${pair}, amount = ${amount}, `)
 
-            const db = admin.firestore()
+        const db = admin.firestore()
 
-            const checkBalance = async () => {
-                db.collection('balance').doc(username).get().then((doc) => {
-                if (!doc.exists) {
-                    // doc.data() will be undefined in this case
-                    db.collection('balance').doc(username).set({'usdt': 0});
-                }
-                }).catch((error) => {
-                    console.log("Error getting document:", error);
-                });
+        const checkBalance = async () => {
+            db.doc(`users/${username}/balance/spot`).get().then((doc) => {
+            if (!doc.exists) {
+                // doc.data() will be undefined in this case
+                db.doc(`users/${username}/balance/spot`).set({'usdt': 0});
             }
-            await checkBalance();
-            let userBalance: FirebaseFirestore.DocumentData = db.collection('balance').doc(username);
-
-            let transactions = db.collection(`transaction`);
-            let usdtBalance = (await userBalance.get()).get('usdt');
-            let targetBalance = (await userBalance.get()).get(pair);
-            if (targetBalance == undefined) {
-                targetBalance = 0;
-            }
-
-
-            transactions.add({
-                'username': username,
-                'timestamp': timestamp,
-                'price': price,
-                'amount': amount,
-                'direction': 'buy'
+            }).catch((error) => {
+                console.log("Error getting document:", error);
             });
+        }
+        await checkBalance();
+        let userBalance: FirebaseFirestore.DocumentData = db.doc(`users/${username}/balance/spot`);
 
-            userBalance.update({
-                'usdt': usdtBalance - amount,
-                [`${pair}`]: targetBalance + amount
-            });
-            res.json({"success": true});
-            break;
-        default:
-            res.status(403).send('Forbidden!');
-    }
+        let transactions = db.collection(`users/${username}/transaction`);
+        let usdtBalance = (await userBalance.get()).get('usdt');
+        let targetBalance = (await userBalance.get()).get(pair);
+        if (usdtBalance == undefined) {
+            usdtBalance = 0;
+        }
+        if (targetBalance == undefined) {
+            targetBalance = 0;
+        }
+
+
+        transactions.add({
+            'username': username,
+            'timestamp': timestamp,
+            'price': price,
+            'amount': amount,
+            'direction': 'buy'
+        });
+
+        userBalance.update({
+            'usdt': usdtBalance - amount,
+            [`${pair}`]: targetBalance + amount
+        });
+        // res.json({"success": true});
+    //         break;
+    //     default:
+    //         res.status(403).send('Forbidden!');
+    // }
 });
