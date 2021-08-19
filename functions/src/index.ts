@@ -108,11 +108,7 @@ exports.readAlert = functions.https.onRequest(async (req, res) => {
 
 
 exports.buyCoin = functions.https.onCall(async (data, context) => {
-    // switch (req.method) {
-    //     case 'POST':
         const timestamp = Date.now();
-        // const body = req.body
-        // console.log(`body = ${body}`)
         let username = data.username;
         let pair = data.pair;
         let price = data.price;
@@ -150,16 +146,12 @@ exports.buyCoin = functions.https.onCall(async (data, context) => {
             'timestamp': timestamp,
             'price': price,
             'amount': amount,
-            'direction': 'buy'
+            'direction': 'buy',
+            'symbol': pair
         });
 
         userBalance.update({
-            'usdt': usdtBalance - amount,
+            'usdt': usdtBalance - amount*price,
             [`${pair}`]: targetBalance + amount
         });
-        // res.json({"success": true});
-    //         break;
-    //     default:
-    //         res.status(403).send('Forbidden!');
-    // }
 });
