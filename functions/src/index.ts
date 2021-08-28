@@ -13,6 +13,10 @@ let coinsList: any;
 
 admin.initializeApp();
 
+var roundToTwoDecimalPlaces = function(num: number) : number {
+  return Math.round((num + Number.EPSILON) * 100) / 100
+}
+
 var sendNotification = function(data: { 
                                         app_id: string; 
                                         contents: { en: string; }; 
@@ -57,8 +61,6 @@ var sendNotification = function(data: {
             return result;
         })
         .then((data: { [x: string]: any; }) => {
-        // console.log('Data: ', data);
-        console.log('Coins: ', data["coins"][0]);
         coinsList = data["coins"];
         });
   };
@@ -82,7 +84,6 @@ exports.readAlert = functions.https.onRequest(async (req, res) => {
     getPrice().then(() => {
 
         alertCoins.forEach(doc => {
-            console.log(doc.id, '=>', doc.data());
             var alertPrice = parseInt(doc.get('higher'));
             var alertCoin = doc.get('id');
             coinsList.forEach((coin: { [x: string]: string; }) => {
@@ -107,51 +108,112 @@ exports.readAlert = functions.https.onRequest(async (req, res) => {
   });
 
 
-exports.buyCoin = functions.https.onCall(async (data, context) => {
-        const timestamp = Date.now();
-        let username = data.username;
-        let pair = data.pair;
-        let price = data.price;
-        let amount = parseInt(data.amount);
-        console.log(`username = ${username}, pair = ${pair}, amount = ${amount}, `)
+  exports.buyCoin = functions.https.onCall(async (data, context) => {
+    const timestamp = Date.now();
+    let username = data.username;
+    let pair = data.pair;
+    let price = data.price;
+    let amount = data.amount;
+    let imgUrl = data.imgUrl;
 
-        const db = admin.firestore()
+    const db = admin.firestore()
 
-        const checkBalance = async () => {
-            db.doc(`users/${username}/balance/spot`).get().then((doc) => {
-            if (!doc.exists) {
-                // doc.data() will be undefined in this case
-                db.doc(`users/${username}/balance/spot`).set({'usdt': 0});
-            }
-            }).catch((error) => {
-                console.log("Error getting document:", error);
-            });
-        }
-        await checkBalance();
-        let userBalance: FirebaseFirestore.DocumentData = db.doc(`users/${username}/balance/spot`);
+    let usdtBalance: number = 0
+    await db.doc(`users/${username}/balance/tether`).get().then((doc) => {
+      if (doc.exists) {
+        usdtBalance = doc.get("amount");
+      }
+    }).catch((error) => {
+      console.log("Error getting document:", error);
+      throw new functions.https.HttpsError('unknown', 'ERROR Document', { message: "Error getting document:" + error});
+    });
 
-        let transactions = db.collection(`users/${username}/transaction`);
-        let usdtBalance = (await userBalance.get()).get('usdt');
-        let targetBalance = (await userBalance.get()).get(pair);
-        if (usdtBalance == undefined) {
-            usdtBalance = 0;
-        }
-        if (targetBalance == undefined) {
-            targetBalance = 0;
-        }
+    let transactions = db.collection(`users/${username}/transaction`);
 
+    if (usdtBalance < roundToTwoDecimalPlaces(amount * price)) {
+      console.error("Not enough Money. current: " + usdtBalance + " needed: " + amount * price);
+      throw new functions.https.HttpsError("invalid-argument", 'Not Enough Money', { message: "Not enough Money. current: " + usdtBalance + " needed: " + amount * price});
+    } else {
+      
+    let targetBalance = 0
+    await db.doc(`users/${username}/balance/${pair}`).get().then((doc) => {
+      if (doc.exists) {
+        targetBalance = doc.get("amount");
+      }
+    }).catch((error) => {
+      console.log("Error getting document:", error);
+      throw new functions.https.HttpsError("unknown", 'ERROR Document', { message: "Error getting document:" + error});
+    });
+      usdtBalance  = roundToTwoDecimalPlaces(usdtBalance - amount * price)
+      targetBalance = roundToTwoDecimalPlaces(targetBalance + amount)
+  
+      await transactions.add({
+          'timestamp': timestamp,
+          'price': price,
+          'amount': amount,
+          'direction': 'buy',
+          'symbol': pair
+      });
+  
+      await db.doc(`users/${username}/balance/tether`).set({'symbol': 'tether', 'amount': usdtBalance} ,{'merge':true});
+      await db.doc(`users/${username}/balance/${pair}`).set({'symbol': pair, 'amount': targetBalance, 'imgUrl': imgUrl} ,{'merge':true});
+    }
+});
 
-        transactions.add({
-            'username': username,
-            'timestamp': timestamp,
-            'price': price,
-            'amount': amount,
-            'direction': 'buy',
-            'symbol': pair
-        });
+exports.sellCoin = functions.https.onCall(async (data, context) => {
+  const timestamp = Date.now();
+  let username = data.username;
+  let pair = data.pair;
+  let price = data.price;
+  let amount = data.amount;
 
-        userBalance.update({
-            'usdt': usdtBalance - amount*price,
-            [`${pair}`]: targetBalance + amount
-        });
+  const db = admin.firestore()
+
+  let usdtBalance: number = 0
+  let targetBalance: number = 0
+  let a = await db.doc(`users/${username}/balance/tether`).get()
+  .then((doc) => {
+    if (doc.exists) {
+      usdtBalance = doc.get("amount");
+    }
+  }).catch((error) => {
+    console.log("Error getting document:", error);
+    throw new functions.https.HttpsError('unknown', 'ERROR Document', { message: "Error getting document:" + error});
+  });
+  let b = await db.doc(`users/${username}/balance/${pair}`).get()
+  .then((doc) => {
+    if (doc.exists) {
+      targetBalance = doc.get("amount");
+    }
+  }).catch((error) => {
+    console.log("Error getting document:", error);
+    throw new functions.https.HttpsError('unknown', 'ERROR Document', { message: "Error getting document:" + error});
+  });
+
+  // await Promise.all([a,b]).then((res) => {
+  //   res[0]
+  // }).catch()
+
+  let transactions = db.collection(`users/${username}/transaction`);
+
+  if (targetBalance < roundToTwoDecimalPlaces(amount)) {
+    console.error("Not enough Amount for "+ pair +". current: " + targetBalance + " needed: " + amount);
+    throw new functions.https.HttpsError("invalid-argument", 'Not Enough Amount', { message: "Not enough Amount. current: " + targetBalance + " needed: " + amount});
+  } 
+  else {
+    
+    usdtBalance  = roundToTwoDecimalPlaces(usdtBalance + amount * price)
+    targetBalance = roundToTwoDecimalPlaces(targetBalance - amount)
+
+    await transactions.add({
+        'timestamp': timestamp,
+        'price': price,
+        'amount': amount,
+        'direction': 'sell',
+        'symbol': pair
+    });
+
+    await db.doc(`users/${username}/balance/tether`).set({'amount': usdtBalance} ,{'merge':true});
+    await db.doc(`users/${username}/balance/${pair}`).set({'amount': targetBalance} ,{'merge':true});
+      }
 });
